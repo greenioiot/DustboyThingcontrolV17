@@ -5,7 +5,13 @@
 #include <SPI.h>
 #include <BME280I2C.h>
 #include <Wire.h>
+#include <LiquidCrystal_PCF8574.h>
+#include <Wire.h>
+boolean isShowTemp = false;
+LiquidCrystal_PCF8574 lcd(0x3F); // set the LCD address to 0x27 for a 16 chars and 2 line display
 
+int show = -1;
+int error;
 TaskHandle_t Task1;
 TaskHandle_t Task2;
 
@@ -15,27 +21,29 @@ TaskHandle_t Task2;
 #define TFT_MOSI  23   // for hardware SPI data pin (all of available pins)
 #define TFT_SCLK  18   // for hardware SPI sclk pin (all of available pins)
 
-Arduino_ST7789 tft = Arduino_ST7789(TFT_DC, TFT_RST, TFT_MOSI, TFT_SCLK); //for display without CS pin
-
+//Arduino_ST7789 tft = Arduino_ST7789(TFT_DC, TFT_RST, TFT_MOSI, TFT_SCLK); //for display without CS pin
+signal meta ;
 String json = "";
 
 HardwareSerial hwSerial(2);
 #define SERIAL1_RXPIN 25
-#define SERIAL1_TXPIN 26
+#define SERIAL1_TXPIN 13
 BME280I2C bme;    // Default : forced mode, standby time = 1000 ms
 
 
-String deviceToken = "x";
+String deviceToken = "rdSjoaopGUwTfksMXG0P";
 String serverIP = "103.27.203.83"; // Your Server IP;
 String serverPort = "9956"; // Your Server Port;
 
 HardwareSerial_NB_BC95 AISnb;
-const long interval = 20000;  //millisecond
+const long interval = 30000;  //millisecond
+const long intervalDisplay = 10000;  //millisecond
 unsigned long previousMillis = 0;
+unsigned long displayPreviousMillis = 0 ;
 float temp(NAN), hum(NAN), pres(NAN);
 
 
-
+boolean readPMS = false;
 
 struct pms7003data {
   uint16_t framelen;
@@ -49,13 +57,46 @@ struct pms7003data {
 
 struct pms7003data data;
 
+void _initLCD()
+{
+
+
+  Serial.println("LCD...");
+
+  Serial.println("Dose: check for LCD");
+
+  // See http://playground.arduino.cc/Main/I2cScanner how to test for a I2C device.
+  Wire.begin(17, 16);
+  Wire.beginTransmission(0x3F);
+  error = Wire.endTransmission();
+  Serial.print("Error: ");
+  Serial.println(error);
+
+
+
+} // _initLCD()
+
+void greeting() {
+  if (error == 0) {
+    Serial.println(": LCD found.");
+    show = 0;
+    lcd.begin(16, 2); // initialize the lcd
+    lcd.setBacklight(255);
+    lcd.home();
+    lcd.clear();
+    lcd.print("Starting Dustboy");
+    lcd.setCursor(0, 1);
+    lcd.print("conn...NB-IoT");
+    delay(500);
+
+  } else {
+    Serial.println(": LCD not found.");
+  } // if
+}
 void _initBME280()
 {
   while (!Serial) {} // Wait
 
-  pinMode(32, OUTPUT); // on BME280
-  
-  digitalWrite(32, HIGH); // on BME280
   delay(200);
   Wire.begin(21, 22);
 
@@ -79,24 +120,23 @@ void _initBME280()
   }
 }
 
-void _initLCD() {
-  tft.init(240, 240);   // initialize a ST7789 chip, 240x240 pixels
-  //  uint16_t time = millis();
-  tft.fillScreen(BLACK);
-  tft.setTextColor(GREEN);
-  tft.setTextSize(3);
-  tft.setCursor(0, 110);
-  tft.println("  Starting..");
-}
 
 void setup() {
-   
-  pinMode(15, OUTPUT); // turn on PMS7003
-  digitalWrite(15, HIGH); // turn on PMS7003
-  delay(200);
+
+  pinMode(4, OUTPUT); // turn on PMS7003
+  digitalWrite(4, HIGH); // turn on PMS7003
+  delay(1000);
+  pinMode(32, OUTPUT); // on BME280
+  digitalWrite(32, HIGH); // on BME280
+  delay(1000);
+  pinMode(33, OUTPUT); // on LCD
+  digitalWrite(33, HIGH); // on LCD
+  delay(1000);
   Serial.begin(115200);
-    hwSerial.begin(9600, SERIAL_8N1, SERIAL1_RXPIN, SERIAL1_TXPIN);
- 
+  _initBME280();
+  _initLCD();
+
+  greeting();
   AISnb.debug = true;
 
   AISnb.setupDevice(serverPort);
@@ -106,62 +146,24 @@ void setup() {
   //
   pingRESP pingR = AISnb.pingIP(serverIP);
   previousMillis = millis();
-  
 
+  hwSerial.begin(9600, SERIAL_8N1, SERIAL1_RXPIN, SERIAL1_TXPIN);
 
- 
+  printBME280Data();
 
 }
- void printBME280Data()
+
+void printBME280Data()
 {
+  _initBME280();
   BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
   BME280::PresUnit presUnit(BME280::PresUnit_Pa);
   bme.read(pres, temp, hum, tempUnit, presUnit);
-  //delay(500);
+
 }
-void loop() {
-  unsigned long currentMillis = millis();
 
-  if (currentMillis - previousMillis >= interval)
-  {
-    readPMSdata(&hwSerial);
-    printBME280Data();
-
-    // tft print function
-    tft.fillScreen(BLACK);
-
-    tft.setCursor(0, 30);
-    tft.setTextColor(GREEN);
-    tft.setTextSize(3);
-    tft.println("  Air Report");
-    tft.println(" -----------");
-    tft.setTextColor(YELLOW);
-    tft.print(" Temp: ");
-    tft.println(temp);
-    tft.print(" Pres: ");
-    int presInt = pres/1000;
-    tft.println(presInt);
-    tft.print(" PM1.0: ");
-    tft.print(data.pm01_env); tft.println(" ug");
-    tft.print(" PM2.5: ");
-    tft.print(data.pm25_env); tft.println(" ug");
-    tft.print(" PM 10: ");
-    tft.print(data.pm100_env); tft.println(" ug");
-    //    //delay(1000);
-
-    composeJson();
-    Serial.println(json);
-    getAQI() ;
-    // Send data in String
-    UDPSend udp = AISnb.sendUDPmsgStr(serverIP, serverPort, json);
-
-    previousMillis = currentMillis;
-    UDPReceive resp = AISnb.waitResponse();
-
-  }
-  
-}
 void composeJson() {
+  meta = AISnb.getSignal();
   json = "";
   json.concat("{\"Tn\":\"");
   json.concat(deviceToken);
@@ -190,12 +192,15 @@ void composeJson() {
   json.concat(data.particles_50um);
   json.concat(",\"pn100\":");
   json.concat(data.particles_100um);
+  json.concat(",\"rssi\":");
+  json.concat(meta.rssi);
   json.concat("}");
 
+  if (data.pm25_env > 1300)
+    ESP.restart();
 
 }
-
-void getAQI() {
+void printPMS7003() {
 
   // reading data was successful!
   //  Serial.println();
@@ -220,9 +225,54 @@ void getAQI() {
 
 }
 
+void showPM() {
+  _initLCD();
+  if (error == 0) {
+    Serial.println(": LCD found.");
+    show = 0;
+    lcd.setBacklight(255);
+    lcd.home();
+    lcd.clear();
+    lcd.print("PM2.5: ");
+    lcd.print(data.pm25_env);
+    lcd.print(" ");
+    lcd.print("ug/m3");
+    lcd.setCursor(0, 1);
+    lcd.print("PM10 : ");
+    lcd.print(data.pm100_env);
+    lcd.print(" ");
+    lcd.print("ug/m3");
+    delay(500);
+    Serial.println("showPM");
+  }
+}
+
+void showTemp() {
+  _initLCD();
+  if (error == 0) {
+    Serial.println(": LCD found.");
+    show = 0;
+    lcd.setBacklight(255);
+    lcd.home();
+    lcd.clear();
+    lcd.print("Temp: ");
+    lcd.print(temp);
+    lcd.print(" ");
+    lcd.print("c");
+    lcd.setCursor(0, 1);
+    lcd.print("Humi: ");
+    lcd.print(hum);
+    lcd.print(" ");
+    lcd.print("%");
+    delay(500);
+    Serial.println("showTemp");
+  }
+}
+
 boolean readPMSdata(Stream *s) {
-  Serial.println("readPMSdata");
+  //  Serial.println("readPMSdata");
   if (! s->available()) {
+    Serial.println("readPMSdata.false");
     return false;
   }
 
@@ -254,9 +304,36 @@ boolean readPMSdata(Stream *s) {
     sum += buffer[i];
   }
   if (sum != data.checksum) {
-        Serial.println("Checksum failure");
+    Serial.println("Checksum failure");
     return false;
   }
   // success!
   return true;
+}
+void loop() {
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval)
+  {
+    previousMillis = currentMillis;
+    readPMS = readPMSdata(&hwSerial);
+    printBME280Data();
+    printPMS7003() ;
+
+
+
+    showPM();
+
+    composeJson();
+    Serial.println(json);
+    if (readPMS) {
+      UDPSend udp = AISnb.sendUDPmsgStr(serverIP, serverPort, json);
+    }
+    UDPReceive resp = AISnb.waitResponse();
+  }
+
+  if (currentMillis - previousMillis >= intervalDisplay) {
+    displayPreviousMillis = currentMillis;
+    showTemp();
+  }
 }
