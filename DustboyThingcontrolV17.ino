@@ -12,8 +12,7 @@ LiquidCrystal_PCF8574 lcd(0x3F); // set the LCD address to 0x27 for a 16 chars a
 
 int show = -1;
 int error;
-TaskHandle_t Task1;
-TaskHandle_t Task2;
+ 
 
 // Board Thingcontrol
 #define TFT_DC    19
@@ -24,25 +23,28 @@ TaskHandle_t Task2;
 //Arduino_ST7789 tft = Arduino_ST7789(TFT_DC, TFT_RST, TFT_MOSI, TFT_SCLK); //for display without CS pin
 signal meta ;
 String json = "";
+String attr = "";
 
 HardwareSerial hwSerial(2);
 #define SERIAL1_RXPIN 25
-#define SERIAL1_TXPIN 13
+#define SERIAL1_TXPIN 26
 BME280I2C bme;    // Default : forced mode, standby time = 1000 ms
 
 
-String deviceToken = "rdSjoaopGUwTfksMXG0P";
+String deviceToken = "testDustboy";
 String serverIP = "103.27.203.83"; // Your Server IP;
 String serverPort = "9956"; // Your Server Port;
 
 HardwareSerial_NB_BC95 AISnb;
+const long intervalSendAttribute = 600000;  //millisecond
 const long interval = 30000;  //millisecond
-const long intervalDisplay = 10000;  //millisecond
+const long intervalDisplay = 40000;  //millisecond
 unsigned long previousMillis = 0;
 unsigned long displayPreviousMillis = 0 ;
+unsigned long attributePreviousMillis = 0;
 float temp(NAN), hum(NAN), pres(NAN);
 
-
+String imsi = "";
 boolean readPMS = false;
 
 struct pms7003data {
@@ -86,8 +88,8 @@ void greeting() {
     lcd.clear();
     lcd.print("Starting Dustboy");
     lcd.setCursor(0, 1);
-    lcd.print("conn...NB-IoT");
-    delay(500);
+    lcd.print(imsi);
+    delay(5000);
 
   } else {
     Serial.println(": LCD not found.");
@@ -123,8 +125,8 @@ void _initBME280()
 
 void setup() {
 
-  pinMode(4, OUTPUT); // turn on PMS7003
-  digitalWrite(4, HIGH); // turn on PMS7003
+  pinMode(15, OUTPUT); // turn on PMS7003
+  digitalWrite(15, HIGH); // turn on PMS7003
   delay(1000);
   pinMode(32, OUTPUT); // on BME280
   digitalWrite(32, HIGH); // on BME280
@@ -142,6 +144,8 @@ void setup() {
   AISnb.setupDevice(serverPort);
   //
   String ip1 = AISnb.getDeviceIP();
+  imsi = AISnb.getIMSI();
+  imsi.trim();
   delay(4000);
   //
   pingRESP pingR = AISnb.pingIP(serverIP);
@@ -150,7 +154,7 @@ void setup() {
   hwSerial.begin(9600, SERIAL_8N1, SERIAL1_RXPIN, SERIAL1_TXPIN);
 
   printBME280Data();
-
+   
 }
 
 void printBME280Data()
@@ -200,6 +204,8 @@ void composeJson() {
     ESP.restart();
 
 }
+
+
 void printPMS7003() {
 
   // reading data was successful!
@@ -310,6 +316,18 @@ boolean readPMSdata(Stream *s) {
   // success!
   return true;
 }
+
+void sendAttribute() {
+  attr = "";
+  attr.concat("{\"Tn\":\"");
+  attr.concat(deviceToken);
+  attr.concat("\",\"IMSI\":");
+  attr.concat("\"");
+  attr.concat(imsi);
+  attr.concat("\"}");
+  UDPSend udp = AISnb.sendUDPmsgStr(serverIP, serverPort, attr);
+
+}
 void loop() {
   unsigned long currentMillis = millis();
 
@@ -319,9 +337,6 @@ void loop() {
     readPMS = readPMSdata(&hwSerial);
     printBME280Data();
     printPMS7003() ;
-
-
-
     showPM();
 
     composeJson();
@@ -332,8 +347,15 @@ void loop() {
     UDPReceive resp = AISnb.waitResponse();
   }
 
-  if (currentMillis - previousMillis >= intervalDisplay) {
+  if (currentMillis - displayPreviousMillis >= intervalDisplay) {
     displayPreviousMillis = currentMillis;
     showTemp();
   }
+
+  if (currentMillis - attributePreviousMillis >= intervalSendAttribute) {
+    attributePreviousMillis = currentMillis;
+    sendAttribute();
+  }
+
+ 
 }
